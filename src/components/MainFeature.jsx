@@ -16,6 +16,11 @@ const MainFeature = () => {
     { id: 'images', name: 'Images', parentId: 'root', fileCount: 0 },
     { id: 'videos', name: 'Videos', parentId: 'root', fileCount: 0 }
   ])
+  const [searchTerm, setSearchTerm] = useState('')
+  const [selectedFileTypes, setSelectedFileTypes] = useState([])
+  const [selectedSizeRange, setSelectedSizeRange] = useState('all')
+  const [sortBy, setSortBy] = useState('date')
+  const [showFilters, setShowFilters] = useState(false)
   const fileInputRef = useRef(null)
 
   const allowedTypes = {
@@ -50,7 +55,7 @@ const MainFeature = () => {
     return errors
   }
 
-  const formatFileSize = (bytes) => {
+const formatFileSize = (bytes) => {
     if (bytes === 0) return '0 Bytes'
     const k = 1024
     const sizes = ['Bytes', 'KB', 'MB', 'GB']
@@ -69,6 +74,90 @@ const MainFeature = () => {
     if (['doc', 'docx'].includes(extension)) return 'FileText'
     if (['txt', 'md'].includes(extension)) return 'FileText'
     return 'File'
+  }
+
+  const filterFiles = (files) => {
+    let filtered = files.filter(file => {
+      // Search by name
+      const matchesSearch = file.name.toLowerCase().includes(searchTerm.toLowerCase())
+      
+      // Filter by file types
+      const matchesType = selectedFileTypes.length === 0 || selectedFileTypes.some(type => {
+        const fileType = file.type.split('/')[0]
+        const extension = file.name.split('.').pop().toLowerCase()
+        
+        if (type === 'image') return fileType === 'image'
+        if (type === 'video') return fileType === 'video'
+        if (type === 'audio') return fileType === 'audio'
+        if (type === 'document') return ['pdf', 'doc', 'docx', 'txt', 'md'].includes(extension)
+        return false
+      })
+      
+      // Filter by size range
+      const matchesSize = selectedSizeRange === 'all' || 
+        (selectedSizeRange === 'small' && file.size < 1024 * 1024) ||
+        (selectedSizeRange === 'medium' && file.size >= 1024 * 1024 && file.size < 10 * 1024 * 1024) ||
+        (selectedSizeRange === 'large' && file.size >= 10 * 1024 * 1024)
+      
+      return matchesSearch && matchesType && matchesSize
+    })
+
+    // Sort files
+    filtered.sort((a, b) => {
+      if (sortBy === 'name') return a.name.localeCompare(b.name)
+      if (sortBy === 'size') return b.size - a.size
+      if (sortBy === 'date') return new Date(b.uploadDate) - new Date(a.uploadDate)
+      return 0
+    })
+
+    return filtered
+  }
+
+  const getUniqueFileTypes = (files) => {
+    const types = new Set()
+    files.forEach(file => {
+      const fileType = file.type.split('/')[0]
+      const extension = file.name.split('.').pop().toLowerCase()
+      
+      if (fileType === 'image') types.add('image')
+      if (fileType === 'video') types.add('video')
+      if (fileType === 'audio') types.add('audio')
+      if (['pdf', 'doc', 'docx', 'txt', 'md'].includes(extension)) types.add('document')
+    })
+    return Array.from(types)
+  }
+
+  const getSizeRangeLabel = (range) => {
+    switch (range) {
+      case 'small': return 'Small (< 1MB)'
+      case 'medium': return 'Medium (1-10MB)'
+      case 'large': return 'Large (> 10MB)'
+      default: return 'All Sizes'
+    }
+  }
+
+  const toggleFileType = (type) => {
+    setSelectedFileTypes(prev => 
+      prev.includes(type) 
+        ? prev.filter(t => t !== type)
+        : [...prev, type]
+    )
+  }
+
+  const clearFilters = () => {
+    setSearchTerm('')
+    setSelectedFileTypes([])
+    setSelectedSizeRange('all')
+    setSortBy('date')
+    toast.success('Filters cleared')
+  }
+
+  const getActiveFilterCount = () => {
+    let count = 0
+    if (searchTerm) count++
+    if (selectedFileTypes.length > 0) count++
+    if (selectedSizeRange !== 'all') count++
+    return count
   }
 
   const simulateUpload = (file) => {
@@ -190,9 +279,10 @@ const MainFeature = () => {
     toast.success('All files cleared')
   }
 
-  const currentFolderData = folders.find(f => f.id === currentFolder)
+const currentFolderData = folders.find(f => f.id === currentFolder)
   const currentFolderFiles = files.filter(f => f.folderId === currentFolder)
-
+  const filteredFiles = filterFiles(currentFolderFiles)
+  const availableFileTypes = getUniqueFileTypes(currentFolderFiles)
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -357,10 +447,10 @@ const MainFeature = () => {
           transition={{ duration: 0.4 }}
           className="glass-card p-4 sm:p-6"
         >
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
             <h4 className="text-lg font-semibold text-surface-900 flex items-center space-x-2">
               <ApperIcon name="Files" className="w-5 h-5 text-primary" />
-              <span>Uploaded Files ({currentFolderFiles.length})</span>
+              <span>Uploaded Files ({filteredFiles.length}{filteredFiles.length !== currentFolderFiles.length ? ` of ${currentFolderFiles.length}` : ''})</span>
             </h4>
             
             <div className="flex items-center space-x-2 text-sm text-surface-600">
@@ -371,9 +461,122 @@ const MainFeature = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Search and Filter Bar */}
+          <div className="mb-6 space-y-4">
+            {/* Search Input */}
+            <div className="relative">
+              <ApperIcon name="Search" className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-surface-400" />
+              <input
+                type="text"
+                placeholder="Search files by name..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-3 border border-surface-200 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-200"
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 p-1 hover:bg-surface-100 rounded-lg transition-colors"
+                >
+                  <ApperIcon name="X" className="w-4 h-4 text-surface-400" />
+                </button>
+              )}
+            </div>
+
+            {/* Filter Toggle and Clear */}
+            <div className="flex items-center justify-between">
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => setShowFilters(!showFilters)}
+                className="inline-flex items-center space-x-2 px-4 py-2 bg-surface-100 hover:bg-surface-200 rounded-lg transition-all duration-200"
+              >
+                <ApperIcon name="Filter" className="w-4 h-4 text-surface-600" />
+                <span className="text-sm font-medium text-surface-700">Filters</span>
+                {getActiveFilterCount() > 0 && (
+                  <span className="bg-primary text-white text-xs px-2 py-1 rounded-full">
+                    {getActiveFilterCount()}
+                  </span>
+                )}
+                <ApperIcon name={showFilters ? "ChevronUp" : "ChevronDown"} className="w-4 h-4 text-surface-400" />
+              </motion.button>
+
+              {getActiveFilterCount() > 0 && (
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={clearFilters}
+                  className="inline-flex items-center space-x-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-all duration-200"
+                >
+                  <ApperIcon name="RotateCcw" className="w-4 h-4" />
+                  <span className="text-sm font-medium">Clear Filters</span>
+                </motion.button>
+              )}
+            </div>
+
+            {/* Filter Options */}
             <AnimatePresence>
-              {currentFolderFiles.map((file, index) => (
+              {showFilters && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-surface-50 rounded-xl border border-surface-200"
+                >
+                  {/* File Type Filter */}
+                  <div>
+                    <label className="block text-sm font-medium text-surface-700 mb-2">File Types</label>
+                    <div className="space-y-2">
+                      {availableFileTypes.map(type => (
+                        <label key={type} className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={selectedFileTypes.includes(type)}
+                            onChange={() => toggleFileType(type)}
+                            className="rounded border-surface-300 text-primary focus:ring-primary/20"
+                          />
+                          <span className="text-sm text-surface-600 capitalize">{type}s</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Size Range Filter */}
+                  <div>
+                    <label className="block text-sm font-medium text-surface-700 mb-2">File Size</label>
+                    <select
+                      value={selectedSizeRange}
+                      onChange={(e) => setSelectedSizeRange(e.target.value)}
+                      className="w-full px-3 py-2 border border-surface-200 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-200"
+                    >
+                      <option value="all">All Sizes</option>
+                      <option value="small">Small (&lt; 1MB)</option>
+                      <option value="medium">Medium (1-10MB)</option>
+                      <option value="large">Large (&gt; 10MB)</option>
+                    </select>
+                  </div>
+
+                  {/* Sort Options */}
+                  <div>
+                    <label className="block text-sm font-medium text-surface-700 mb-2">Sort By</label>
+                    <select
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value)}
+                      className="w-full px-3 py-2 border border-surface-200 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-200"
+                    >
+                      <option value="date">Upload Date (Newest)</option>
+                      <option value="name">Name (A-Z)</option>
+                      <option value="size">Size (Largest)</option>
+                    </select>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+<div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <AnimatePresence>
+              {filteredFiles.map((file, index) => (
                 <motion.div
                   key={file.id}
                   initial={{ opacity: 0, x: -20 }}
